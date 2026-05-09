@@ -95,7 +95,6 @@ rosdep install --from-paths src --ignore-src -r -y \
 colcon build --symlink-install \
     --packages-select \
         anubix_navigation \
-        anubix_perception \
         anubix_rpi_bridge \
         anubix_bringup_rpi \
     2>&1 | tee -a "$LOG_FILE" \
