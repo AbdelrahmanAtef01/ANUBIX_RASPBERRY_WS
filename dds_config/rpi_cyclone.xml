@@ -1,0 +1,49 @@
+<!--
+  CycloneDDS configuration for the Raspberry Pi.
+
+  This file configures unicast-only peer discovery over the direct
+  Raspberry Pi ↔ Jetson Orin Nano ethernet link.
+
+  IMPORTANT — interface name:
+    On Raspberry Pi the built-in ethernet is typically "eth0".
+    Verify with:  ip link show
+    Update the NetworkInterface 'name' attribute below if different.
+
+  Network topology:
+    RPi     IP: 192.168.10.2 / 24   (this machine)
+    Jetson  IP: 192.168.10.1 / 24   (peer)
+
+  Apply with:
+    export CYCLONEDDS_URI=file://$HOME/anubix_rpi_ws/dds_config/rpi_cyclone.xml
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    export ROS_DOMAIN_ID=42
+-->
+<CycloneDDS>
+  <Domain id="any">
+
+    <General>
+      <!-- Replace "eth0" with your actual ethernet interface name if different -->
+      <Interfaces>
+        <NetworkInterface name="eth0" priority="default" multicast="false"/>
+      </Interfaces>
+      <!-- Disable multicast — direct link may not support it reliably -->
+      <AllowMulticast>false</AllowMulticast>
+    </General>
+
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>32</MaxAutoParticipantIndex>
+      <!-- Unicast peer: Jetson Orin Nano -->
+      <Peers>
+        <Peer address="192.168.10.1"/>
+      </Peers>
+    </Discovery>
+
+    <Tracing>
+      <!-- Set to "config" or "finest" for deep DDS debugging -->
+      <Verbosity>warning</Verbosity>
+      <OutputFile>stderr</OutputFile>
+    </Tracing>
+
+  </Domain>
+</CycloneDDS>

@@ -1,0 +1,11 @@
+anubix_rpi_bridge:
+  ros__parameters:
+    # IP of the Jetson Orin Nano on the direct ethernet link
+    jetson_ip: "192.168.10.1"
+    # Heartbeat publish interval (seconds)
+    heartbeat_interval: 1.0
+    # How long without a Jetson heartbeat before logging CONNECTION LOST (seconds)
+    connection_timeout: 5.0
+    # If true: publish /supervisor/force_stop=true to halt local stacks
+    # when the Jetson link is lost. Set false only during debugging.
+    emergency_stop_on_disconnect: true

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>anubix_bringup_rpi</name>
+  <version>1.0.0</version>
+  <description>Bringup launch files for the ANUBIX Raspberry Pi nodes (navigation + perception + bridge)</description>
+  <maintainer email="anubix@example.com">ANUBIX Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>anubix_navigation</exec_depend>
+  <exec_depend>anubix_perception</exec_depend>
+  <exec_depend>anubix_rpi_bridge</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
