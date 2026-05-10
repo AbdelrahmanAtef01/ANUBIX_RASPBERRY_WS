@@ -15,7 +15,7 @@
 #
 # What this script does (fully automatic, no extra input needed):
 #   1.  Clones ANUBIX_RASPBERRY_WS → ~/anubix_rpi_ws   (skip if already present)
-#   2.  Installs ROS 2 Humble                           (skip if already present)
+#   2.  Installs ROS 2 Humble                          (skip if already present)
 #   3.  Installs build tools (colcon, rosdep)
 #   4.  Installs Python dependencies
 #   5.  Builds the workspace with colcon
@@ -80,26 +80,32 @@ log "[2/9] Checking ROS 2 Humble ..."
 if [ ! -f /opt/ros/humble/setup.bash ]; then
     log "  Installing ROS 2 Humble (this takes ~10 minutes on RPi) ..."
 
+    # Bulletproof locale generation (Prevents the update-locale error)
     sudo apt-get install -y locales > /dev/null
-    sudo locale-gen en_US en_US.UTF-8
+    sudo sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen || true
+    sudo locale-gen en_US.UTF-8
     sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
     export LANG=en_US.UTF-8
 
-    sudo apt-get install -y software-properties-common curl gnupg lsb-release > /dev/null
+    # Install Universal prerequisites (Removed software-properties-common)
+    sudo apt-get install -y curl gnupg2 lsb-release > /dev/null
 
-    # Add ROS 2 repository
+    # Add ROS 2 repository GPG key
     sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
         -o /usr/share/keyrings/ros-archive-keyring.gpg
 
-    # Debian uses "bookworm" or "trixie" — detect it
-    DEBIAN_CODENAME=$(lsb_release -cs)
-    log "  Detected Debian codename: $DEBIAN_CODENAME"
+    # OS Detection logic to seamlessly map Debian (trixie/bookworm) to Ubuntu (jammy)
+    OS_CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
+    log "  Detected OS codename: $OS_CODENAME"
 
-    # ROS 2 Humble officially supports Ubuntu 22.04 (jammy)
-    # For Debian we use the testing/sid repository
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
-http://packages.ros.org/ros2/ubuntu jammy main" \
-        | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+    if [ "$OS_CODENAME" = "trixie" ] || [ "$OS_CODENAME" = "bookworm" ]; then
+        REPO_CODENAME="jammy"
+        log "  Mapping Debian $OS_CODENAME to Ubuntu $REPO_CODENAME for ROS 2 Humble compatibility..."
+    else
+        REPO_CODENAME=$OS_CODENAME
+    fi
+
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $REPO_CODENAME main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
     sudo apt-get update -qq
     sudo apt-get install -y \
