@@ -28,7 +28,7 @@
 #   ros2 launch anubix_bringup_rpi rpi_full.launch.py
 # =============================================================================
 
-set -uo pipefail
+set -eo pipefail
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/AbdelrahmanAtef01/ANUBIX_RASPBERRY_WS.git"
