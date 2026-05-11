@@ -5,8 +5,6 @@
 # Configures the ethernet interface with a static IP for the
 # point-to-point link to the Jetson.
 #
-# Tested on: Raspberry Pi OS (Debian Bookworm/Trixie) 64-bit
-#
 # RPi    → 192.168.10.2/24
 # Jetson → 192.168.10.1/24
 #
@@ -17,7 +15,7 @@
 #   sudo ./configure_rpi_network.sh eth1
 # =============================================================================
 
-set -eo pipefail
+set -euo pipefail
 
 RPI_IP="192.168.10.2"
 JETSON_IP="192.168.10.1"
@@ -56,38 +54,24 @@ else
     log "  - Check the ethernet cable connection"
 fi
 
-# ── Persist config (dhcpcd for Raspberry Pi OS, NetworkManager fallback) ─────
-if systemctl is-active --quiet dhcpcd; then
-    log "Detected dhcpcd — writing persistent config..."
-    DHCPCD_CONF="/etc/dhcpcd.conf"
-    if ! grep -q "# ANUBIX static IP" "$DHCPCD_CONF" 2>/dev/null; then
-        cat >> "$DHCPCD_CONF" << DHCPCD
-
-# ANUBIX static IP for direct Jetson link
-interface ${IFACE}
-static ip_address=${RPI_IP}/${PREFIX}
-nolink
-DHCPCD
-        systemctl restart dhcpcd 2>/dev/null || log "  WARNING: dhcpcd restart failed"
-        log "  dhcpcd config updated (survives reboots)"
-    else
-        log "  dhcpcd already contains ANUBIX config — skipping"
-    fi
-
-elif command -v nmcli &>/dev/null; then
-    log "Detected NetworkManager — creating connection profile..."
-    nmcli con add type ethernet \
-        con-name anubix-link \
-        ifname "$IFACE" \
-        ipv4.method manual \
-        ipv4.addresses "${RPI_IP}/${PREFIX}" \
-        2>/dev/null || log "  nmcli profile creation failed (may already exist)"
-    nmcli con up anubix-link 2>/dev/null || true
-    log "  NetworkManager profile 'anubix-link' created"
-
+# ── Persist with netplan (Ubuntu) ─────────────────────────────────────────────
+NETPLAN_FILE="/etc/netplan/99-anubix-link.yaml"
+if command -v netplan &>/dev/null; then
+    log "Writing netplan config for persistence..."
+    cat > "$NETPLAN_FILE" << NETPLAN
+network:
+  version: 2
+  ethernets:
+    ${IFACE}:
+      dhcp4: false
+      addresses:
+        - ${RPI_IP}/${PREFIX}
+      optional: true
+NETPLAN
+    netplan apply 2>/dev/null || log "  WARNING: netplan apply failed"
+    log "  Persistent config: $NETPLAN_FILE"
 else
-    log "  Neither dhcpcd nor NetworkManager detected."
-    log "  Config is temporary. To persist, manually edit /etc/network/interfaces"
+    log "  netplan not found — config is temporary (lost on reboot)."
 fi
 
 log ""

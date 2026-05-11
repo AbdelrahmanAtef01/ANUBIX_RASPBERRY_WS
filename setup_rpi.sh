@@ -2,10 +2,10 @@
 # =============================================================================
 # ANUBIX ROS 2 Workspace — Raspberry Pi Setup
 # =============================================================================
-# Tested on: Raspberry Pi OS (Debian 12 Bookworm / Trixie) 64-bit
+# Tested on: Raspberry Pi 4/5 running Ubuntu 22.04 (arm64)
 #
 # Prerequisites:
-#   - Raspberry Pi OS 64-bit (Debian Bookworm or Trixie)
+#   - Ubuntu 22.04 Server or Desktop (arm64) flashed to SD card
 #   - Internet connection during setup
 #
 # Usage:
@@ -13,7 +13,7 @@
 #   ./setup_rpi.sh
 # =============================================================================
 
-set -eo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="$SCRIPT_DIR"
@@ -39,13 +39,14 @@ if [ ! -f /opt/ros/humble/setup.bash ]; then
     sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
     export LANG=en_US.UTF-8
 
-    sudo apt install -y software-properties-common curl gnupg lsb-release
+    sudo apt install -y software-properties-common curl
+    sudo add-apt-repository universe
     sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
         -o /usr/share/keyrings/ros-archive-keyring.gpg
-    # ROS 2 Humble uses Ubuntu Jammy repository (works on Debian)
     echo "deb [arch=$(dpkg --print-architecture) \
 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
-http://packages.ros.org/ros2/ubuntu jammy main" \
+http://packages.ros.org/ros2/ubuntu \
+$(. /etc/os-release && echo "$UBUNTU_CODENAME") main" \
         | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
     sudo apt update
@@ -80,7 +81,7 @@ rosdep update
 # ── 3. Python dependencies ────────────────────────────────────────────────────
 log ""
 log "[3/6] Installing Python dependencies..."
-pip3 install --break-system-packages numpy 2>/dev/null || pip3 install numpy || die "pip install failed"
+pip3 install numpy || die "pip install failed"
 
 # ── 4. Build workspace ────────────────────────────────────────────────────────
 log ""

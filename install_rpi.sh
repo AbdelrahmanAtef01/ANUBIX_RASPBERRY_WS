@@ -3,9 +3,7 @@
 # ANUBIX — Raspberry Pi  ·  One-Command Setup
 # =============================================================================
 #
-# Tested on: Raspberry Pi OS (Debian 12 Bookworm / Trixie) 64-bit
-#
-# Run ONE command on a fresh Raspberry Pi:
+# Run ONE command on a fresh Raspberry Pi (Ubuntu 22.04 arm64):
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/AbdelrahmanAtef01/ANUBIX_RASPBERRY_WS/main/install_rpi.sh)
 #
@@ -20,7 +18,7 @@
 #   4.  Installs Python dependencies
 #   5.  Builds the workspace with colcon
 #   6.  Configures eth0 with static IP 192.168.10.2/24
-#   7.  Writes persistent network config (dhcpcd / NetworkManager)
+#   7.  Writes a persistent netplan config              (survives reboots)
 #   8.  Copies & patches the CycloneDDS XML
 #   9.  Writes all env vars to ~/.bashrc
 #  10.  Prints the single launch command
@@ -48,7 +46,6 @@ die()  { log "ERROR: $*"; exit 1; }
 
 log "============================================================"
 log "  ANUBIX Raspberry Pi — Full Setup"
-log "  Raspberry Pi OS (Debian Bookworm/Trixie 64-bit)"
 log "  Log: $LOG_FILE"
 log "============================================================"
 
@@ -78,7 +75,7 @@ log ""
 log "[2/9] Checking ROS 2 Humble ..."
 
 if [ ! -f /opt/ros/humble/setup.bash ]; then
-    log "  Installing ROS 2 Humble (this takes ~10 minutes on RPi) ..."
+    log "  Installing ROS 2 Humble (this takes ~5 minutes) ..."
 
     # Bulletproof locale generation (Prevents the update-locale error)
     sudo apt-get install -y locales > /dev/null
@@ -87,25 +84,14 @@ if [ ! -f /opt/ros/humble/setup.bash ]; then
     sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
     export LANG=en_US.UTF-8
 
-    # Install Universal prerequisites (Removed software-properties-common)
-    sudo apt-get install -y curl gnupg2 lsb-release > /dev/null
-
-    # Add ROS 2 repository GPG key
+    sudo apt-get install -y software-properties-common > /dev/null
+    sudo add-apt-repository -y universe > /dev/null
     sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
         -o /usr/share/keyrings/ros-archive-keyring.gpg
 
-    # OS Detection logic to seamlessly map Debian (trixie/bookworm) to Ubuntu (jammy)
-    OS_CODENAME=$(. /etc/os-release && echo $VERSION_CODENAME)
-    log "  Detected OS codename: $OS_CODENAME"
-
-    if [ "$OS_CODENAME" = "trixie" ] || [ "$OS_CODENAME" = "bookworm" ]; then
-        REPO_CODENAME="jammy"
-        log "  Mapping Debian $OS_CODENAME to Ubuntu $REPO_CODENAME for ROS 2 Humble compatibility..."
-    else
-        REPO_CODENAME=$OS_CODENAME
-    fi
-
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $REPO_CODENAME main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo "$UBUNTU_CODENAME") main" \
+        | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
     sudo apt-get update -qq
     sudo apt-get install -y \
@@ -138,11 +124,11 @@ rosdep update 2>&1 | tail -5
 # ── 4. Python dependencies ────────────────────────────────────────────────────
 log ""
 log "[4/9] Installing Python dependencies ..."
-pip3 install --break-system-packages numpy 2>/dev/null || pip3 install numpy || die "pip install failed"
+pip3 install --quiet numpy || die "pip install failed"
 
 # ── 5. Build workspace ────────────────────────────────────────────────────────
 log ""
-log "[5/9] Building ANUBIX RPi workspace (this takes ~3 minutes on RPi) ..."
+log "[5/9] Building ANUBIX RPi workspace (this takes ~2 minutes) ..."
 
 . /opt/ros/humble/setup.bash
 
@@ -169,38 +155,19 @@ if ip link show "$IFACE" > /dev/null 2>&1; then
     sudo ip link set "$IFACE" up
     log "  Static IP ${RPI_IP}/24 assigned to $IFACE"
 
-    # Detect network manager: dhcpcd (Raspberry Pi OS default) or NetworkManager
-    if systemctl is-active --quiet dhcpcd; then
-        log "  Detected dhcpcd — writing persistent config..."
-        DHCPCD_CONF="/etc/dhcpcd.conf"
-        if ! grep -q "# ANUBIX static IP" "$DHCPCD_CONF" 2>/dev/null; then
-            sudo tee -a "$DHCPCD_CONF" > /dev/null << DHCPCD
-
-# ANUBIX static IP for direct Jetson link
-interface ${IFACE}
-static ip_address=${RPI_IP}/24
-nolink
-DHCPCD
-            sudo systemctl restart dhcpcd 2>/dev/null || warn "dhcpcd restart failed"
-            log "  dhcpcd config updated (survives reboots)"
-        else
-            log "  dhcpcd already contains ANUBIX config — skipping"
-        fi
-
-    elif command -v nmcli &>/dev/null; then
-        log "  Detected NetworkManager — creating connection profile..."
-        sudo nmcli con add type ethernet \
-            con-name anubix-link \
-            ifname "$IFACE" \
-            ipv4.method manual \
-            ipv4.addresses "${RPI_IP}/24" \
-            2>/dev/null || warn "nmcli profile creation failed (may already exist)"
-        sudo nmcli con up anubix-link 2>/dev/null || true
-        log "  NetworkManager profile 'anubix-link' created"
-
-    else
-        warn "Neither dhcpcd nor NetworkManager detected."
-        warn "Network config is temporary. To persist, manually edit /etc/network/interfaces"
+    if command -v netplan &>/dev/null; then
+        sudo tee /etc/netplan/99-anubix-link.yaml > /dev/null << NETPLAN
+network:
+  version: 2
+  ethernets:
+    ${IFACE}:
+      dhcp4: false
+      addresses:
+        - ${RPI_IP}/24
+      optional: true
+NETPLAN
+        sudo netplan apply 2>/dev/null || warn "netplan apply failed"
+        log "  Persistent netplan config written (survives reboots)"
     fi
 
     if ping -c 2 -W 2 -I "$IFACE" "$JETSON_IP" > /dev/null 2>&1; then
