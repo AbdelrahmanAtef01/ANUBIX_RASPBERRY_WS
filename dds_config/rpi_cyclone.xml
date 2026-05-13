@@ -15,10 +15,18 @@
     bind and `ros2 node list` returns empty even though every node is
     running fine inside the launch.
 
+    Then we tried `autodetermine="true"` as a second entry alongside
+    the address binding. That broke too: when 192.168.10.2 IS up,
+    autodetermine picks the same physical NIC (eth0 is the default
+    route) and Cyclone aborts with "the same interface may not be
+    selected twice" → rmw_create_node fails → every node crashes.
+
     Now: we declare the direct-link IP as a "best-effort" interface
     (presence_required=false → Cyclone does NOT fail if it is missing)
-    AND let Cyclone autodetect the system default so there is always
-    at least one usable interface for local discovery.
+    AND use explicit loopback (name="lo") as the fallback. lo is
+    always present, never collides with eth0, and the Peer entry for
+    localhost completes SPDP via lo so cross-process discovery on
+    this Pi survives a no-Jetson-cable boot.
 
   Network topology:
     RPi     IP: 192.168.10.2 / 24   (this machine; optional at boot)
@@ -41,10 +49,13 @@
         -->
         <NetworkInterface address="192.168.10.2" presence_required="false" priority="10"/>
         <!--
-          Fallback: pick the system default interface so local
-          discovery always has a working transport.
+          Fallback: explicit loopback. Always present, distinct from
+          eth0 (so no "same interface twice" error when the direct
+          link is up), and combined with the localhost <Peer/> entry
+          below it keeps cross-process discovery on this Pi alive
+          even when the Jetson cable is unplugged.
         -->
-        <NetworkInterface autodetermine="true" priority="0"/>
+        <NetworkInterface name="lo" priority="0"/>
       </Interfaces>
       <!--
         SPDP = multicast for participant discovery only; bulk data
