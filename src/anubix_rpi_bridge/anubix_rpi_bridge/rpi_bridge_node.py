@@ -69,6 +69,20 @@ class RpiBridgeNode(Node):
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
+        # force_stop must be VOLATILE on BOTH publisher and subscriber
+        # — this bridge's e-stop publisher was the second source of
+        # latched state on /supervisor/force_stop (the master being
+        # the first). With two TRANSIENT_LOCAL publishers, late-
+        # joining consumers received both latched values in
+        # nondeterministic order; a stale True from a previous e-stop
+        # could lock every Jetson stack into force_stop on every
+        # restart. VOLATILE makes the topic strictly edge-triggered.
+        force_stop_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            durability=DurabilityPolicy.VOLATILE,
+        )
 
         # Publishers
         self._hb_pub = self.create_publisher(
@@ -76,7 +90,7 @@ class RpiBridgeNode(Node):
         self._conn_pub = self.create_publisher(
             String, '/bridge/connection_status', reliable_qos)
         self._estop_pub = self.create_publisher(
-            Bool, '/supervisor/force_stop', cmd_qos)
+            Bool, '/supervisor/force_stop', force_stop_qos)
 
         # Subscriptions
         self.create_subscription(
@@ -93,7 +107,7 @@ class RpiBridgeNode(Node):
             cmd_qos, callback_group=self._sub_group)
         self.create_subscription(
             Bool, '/supervisor/force_stop', self._on_force_stop,
-            cmd_qos, callback_group=self._sub_group)
+            force_stop_qos, callback_group=self._sub_group)
         self.create_subscription(
             String, '/nav/status', self._on_nav_status,
             reliable_qos, callback_group=self._sub_group)

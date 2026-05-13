@@ -59,6 +59,15 @@ class NavigationNode(Node):
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
+        # force_stop is edge-triggered — must be VOLATILE so a stale
+        # latched True (e.g. from a previous rpi_bridge emergency stop)
+        # cannot strand this node on every restart.
+        force_stop_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            durability=DurabilityPolicy.VOLATILE,
+        )
         pub_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -72,7 +81,7 @@ class NavigationNode(Node):
             Bool, '/supervisor/nav_vision', self._on_nav_vision, cmd_qos,
             callback_group=self._sub_group)
         self.create_subscription(
-            Bool, '/supervisor/force_stop', self._on_force_stop, cmd_qos,
+            Bool, '/supervisor/force_stop', self._on_force_stop, force_stop_qos,
             callback_group=self._sub_group)
 
         self._status_pub = self.create_publisher(String, '/nav/status', pub_qos)

@@ -49,6 +49,15 @@ class PerceptionNode(Node):
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
+        # force_stop is edge-triggered — must be VOLATILE so a stale
+        # latched True (e.g. from a previous rpi_bridge emergency stop)
+        # cannot strand this node on every restart.
+        force_stop_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            durability=DurabilityPolicy.VOLATILE,
+        )
         pub_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -60,7 +69,7 @@ class PerceptionNode(Node):
         self.create_subscription(
             String, '/supervisor/target_camera', self._on_target_camera, cmd_qos)
         self.create_subscription(
-            Bool, '/supervisor/force_stop', self._on_force_stop, cmd_qos)
+            Bool, '/supervisor/force_stop', self._on_force_stop, force_stop_qos)
 
         self._status_pub = self.create_publisher(
             String, '/perception/status', pub_qos)
@@ -73,9 +82,15 @@ class PerceptionNode(Node):
             f'delay={self._detection_delay}s')
 
     def _on_force_stop(self, msg: Bool):
-        if msg.data:
-            self._force_stopped = True
+        # Edge semantics: True aborts/blocks new goals, False re-arms
+        # the node. Matches master's True+False edge so a single
+        # force_stop doesn't permanently disable perception.
+        was = self._force_stopped
+        self._force_stopped = bool(msg.data)
+        if self._force_stopped:
             self.get_logger().warning('[PERCEPTION] Force stop — ignoring future goals')
+        elif was:
+            self.get_logger().info('[PERCEPTION] Force stop CLEARED — ready for new goals')
 
     def _on_target_camera(self, msg: String):
         try:

@@ -1,16 +1,27 @@
 <!--
   CycloneDDS configuration for the Raspberry Pi.
 
-  This file configures unicast-only peer discovery over the direct
-  Raspberry Pi ↔ Jetson Orin Nano ethernet link.
+  Goals:
+    (a) Local participant discovery between separate ROS terminals on
+        this Pi always works, even when the direct-ethernet link to
+        the Jetson is not yet configured (no 192.168.10.2 interface).
+    (b) Cross-machine discovery to the Jetson works over the direct
+        ethernet link once 192.168.10.2 is up.
 
-  IMPORTANT — interface name:
-    On Raspberry Pi the built-in ethernet is typically "eth0".
-    Verify with:  ip link show
-    Update the NetworkInterface 'name' attribute below if different.
+  Why this shape:
+    Previous revisions pinned the interface to a hardcoded name
+    ("eth0") or address. If the kernel renames the interface, or the
+    Pi is booted without the Jetson cable, Cyclone has nothing to
+    bind and `ros2 node list` returns empty even though every node is
+    running fine inside the launch.
+
+    Now: we declare the direct-link IP as a "best-effort" interface
+    (presence_required=false → Cyclone does NOT fail if it is missing)
+    AND let Cyclone autodetect the system default so there is always
+    at least one usable interface for local discovery.
 
   Network topology:
-    RPi     IP: 192.168.10.2 / 24   (this machine)
+    RPi     IP: 192.168.10.2 / 24   (this machine; optional at boot)
     Jetson  IP: 192.168.10.1 / 24   (peer)
 
   Apply with:
@@ -22,19 +33,34 @@
   <Domain id="any">
 
     <General>
-      <!-- Replace "eth0" with your actual ethernet interface name if different -->
       <Interfaces>
-        <NetworkInterface name="eth0" priority="default" multicast="false"/>
+        <!--
+          Preferred interface: direct ethernet link to the Jetson.
+          presence_required="false" lets Cyclone fall back to the
+          autodetected interface when 192.168.10.2 isn't up yet.
+        -->
+        <NetworkInterface address="192.168.10.2" presence_required="false" priority="10"/>
+        <!--
+          Fallback: pick the system default interface so local
+          discovery always has a working transport.
+        -->
+        <NetworkInterface autodetermine="true" priority="0"/>
       </Interfaces>
-      <!-- Disable multicast — direct link may not support it reliably -->
-      <AllowMulticast>false</AllowMulticast>
+      <!--
+        SPDP = multicast for participant discovery only; bulk data
+        still flows unicast. Keeps the direct link free of heavy
+        multicast while letting local processes find each other.
+      -->
+      <AllowMulticast>spdp</AllowMulticast>
     </General>
 
     <Discovery>
       <ParticipantIndex>auto</ParticipantIndex>
       <MaxAutoParticipantIndex>32</MaxAutoParticipantIndex>
-      <!-- Unicast peer: Jetson Orin Nano -->
       <Peers>
+        <!-- localhost: guarantees cross-terminal discovery on this Pi -->
+        <Peer address="localhost"/>
+        <!-- Jetson over the direct ethernet link -->
         <Peer address="192.168.10.1"/>
       </Peers>
     </Discovery>
