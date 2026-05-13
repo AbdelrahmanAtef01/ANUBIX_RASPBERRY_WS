@@ -90,10 +90,18 @@ class NavigationNode(Node):
         self.get_logger().info('[NAV] Ready and waiting for goals.')
 
     def _on_force_stop(self, msg: Bool):
-        if msg.data:
-            self._force_stopped = True
+        # Edge semantics: True aborts any in-flight nav (the simulated
+        # move loop checks the flag mid-sleep). False re-arms the node so
+        # the next nav_goal works. Mirrors the master's True+False edge
+        # publish so a stale latched True can never strand the robot.
+        was = self._force_stopped
+        self._force_stopped = bool(msg.data)
+        if self._force_stopped:
             self.get_logger().warning(
-                '[NAV] *** FORCE STOP RECEIVED *** — ignoring future goals')
+                '[NAV] *** FORCE STOP RECEIVED *** — aborting in-flight nav')
+        elif was:
+            self.get_logger().info(
+                '[NAV] Force stop CLEARED — ready for new goals')
 
     def _on_nav_vision(self, msg: Bool):
         self._vision_flag = bool(msg.data)

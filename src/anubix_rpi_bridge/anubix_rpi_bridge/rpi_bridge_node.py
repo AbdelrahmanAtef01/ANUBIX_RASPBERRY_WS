@@ -230,13 +230,18 @@ class RpiBridgeNode(Node):
             f'[total={total}]')
 
     def _on_force_stop(self, msg: Bool):
-        if not msg.data:
-            return
-        with self._lock:
-            self._stats['force_stops_received'] += 1
-            total = self._stats['force_stops_received']
-        self.get_logger().warning(
-            f'[BRIDGE<-Jetson] /supervisor/force_stop=TRUE [total={total}]')
+        # Log both edges so the operator can see when the master re-arms
+        # the system (either explicitly after an abort, or at startup to
+        # clear any stale latched True from a previous run).
+        if msg.data:
+            with self._lock:
+                self._stats['force_stops_received'] += 1
+                total = self._stats['force_stops_received']
+            self.get_logger().warning(
+                f'[BRIDGE<-Jetson] /supervisor/force_stop=TRUE [total={total}]')
+        else:
+            self.get_logger().info(
+                '[BRIDGE<-Jetson] /supervisor/force_stop=False (re-armed)')
 
     def _on_nav_status(self, msg: String):
         with self._lock:
