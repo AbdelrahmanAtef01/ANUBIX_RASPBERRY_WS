@@ -2,11 +2,21 @@
 """
 ANUBIX Navigation Stack — Node (Raspberry Pi)
 ===============================================
-Subscribes to: /supervisor/nav_goal   (geometry_msgs/PoseStamped)  <- from Jetson master
-               /supervisor/force_stop (std_msgs/Bool)               <- from Jetson master
-Publishes to:  /nav/status            (std_msgs/String)             -> to Jetson master
+Subscribes to: /supervisor/nav_goal     (geometry_msgs/PoseStamped) <- from Jetson master
+               /supervisor/nav_vision   (std_msgs/Bool)             <- from Jetson master
+               /supervisor/force_stop   (std_msgs/Bool)             <- from Jetson master
+Publishes to:  /nav/status              (std_msgs/String)           -> to Jetson master
 
 Status values: navigating | point_reached | blocked | failure
+
+Vision flag:
+  - True  → nav stops ~vision_standoff_m metres short of the goal so the
+            on-board camera can take over the final approach.
+  - False → nav drives all the way to the goal.
+
+The mock just sleeps and reports point_reached either way; the standoff
+behaviour is logged so the architecture is in place for the real Nav2
+hook-up later.
 """
 
 import time
@@ -29,11 +39,17 @@ class NavigationNode(Node):
 
         self.declare_parameter('simulate', True)
         self.declare_parameter('nav_delay', 2.0)
+        # How far in front of the goal nav stops when vision=True.
+        self.declare_parameter('vision_standoff_m', 1.0)
         self._simulate = self.get_parameter('simulate').value
         self._nav_delay = self.get_parameter('nav_delay').value
+        self._vision_standoff_m = float(self.get_parameter('vision_standoff_m').value)
         self._force_stopped = False
         self._navigating = False
         self._nav_lock = threading.Lock()
+        # Latched: True means "stop short, vision takes over". Defaults
+        # False so older callers that don't set the flag keep working.
+        self._vision_flag = False
 
         self._sub_group = ReentrantCallbackGroup()
 
@@ -51,6 +67,9 @@ class NavigationNode(Node):
 
         self.create_subscription(
             PoseStamped, '/supervisor/nav_goal', self._on_nav_goal, cmd_qos,
+            callback_group=self._sub_group)
+        self.create_subscription(
+            Bool, '/supervisor/nav_vision', self._on_nav_vision, cmd_qos,
             callback_group=self._sub_group)
         self.create_subscription(
             Bool, '/supervisor/force_stop', self._on_force_stop, cmd_qos,
@@ -76,15 +95,28 @@ class NavigationNode(Node):
             self.get_logger().warning(
                 '[NAV] *** FORCE STOP RECEIVED *** — ignoring future goals')
 
+    def _on_nav_vision(self, msg: Bool):
+        self._vision_flag = bool(msg.data)
+        self.get_logger().info(
+            f'[NAV] vision flag = {self._vision_flag} '
+            f'(stop {self._vision_standoff_m:.2f} m short of goal '
+            f'when True)')
+
     def _on_nav_goal(self, msg: PoseStamped):
         x = msg.pose.position.x
         y = msg.pose.position.y
         frame = msg.header.frame_id
+        vision = self._vision_flag
 
         self.get_logger().info(
             f'[NAV] ========================================')
         self.get_logger().info(
-            f'[NAV] Goal RECEIVED: ({x:.3f}, {y:.3f}) frame="{frame}"')
+            f'[NAV] Goal RECEIVED: ({x:.3f}, {y:.3f}) frame="{frame}" '
+            f'vision={vision}')
+        if vision:
+            self.get_logger().info(
+                f'[NAV] vision=True → will stop ~{self._vision_standoff_m:.2f} m '
+                f'short of ({x:.3f}, {y:.3f}); on-board camera handles the rest.')
         self.get_logger().info(
             f'[NAV] ========================================')
 
@@ -107,26 +139,34 @@ class NavigationNode(Node):
         self.get_logger().info('[NAV] Published status: "navigating"')
 
         if self._simulate:
-            # Run navigation in a thread with sleep (NOT a repeating timer)
             threading.Thread(
                 target=self._simulate_navigation,
-                args=(x, y),
+                args=(x, y, vision),
                 daemon=True).start()
         else:
-            # TODO: Send goal to Nav2 action server
+            # TODO: Send goal to Nav2 action server. When vision=True,
+            # truncate the goal to be vision_standoff_m short along the
+            # current heading before forwarding to Nav2.
             self.get_logger().warning(
                 '[NAV] Hardware mode not yet implemented! '
                 'Falling back to simulated delay.')
             threading.Thread(
                 target=self._simulate_navigation,
-                args=(x, y),
+                args=(x, y, vision),
                 daemon=True).start()
 
-    def _simulate_navigation(self, x: float, y: float):
+    def _simulate_navigation(self, x: float, y: float, vision: bool):
         try:
-            self.get_logger().info(
-                f'[NAV] Simulating navigation to ({x:.3f}, {y:.3f}) '
-                f'— waiting {self._nav_delay}s...')
+            if vision:
+                self.get_logger().info(
+                    f'[NAV] Simulating navigation to '
+                    f'({x:.3f}, {y:.3f}) but stopping '
+                    f'~{self._vision_standoff_m:.2f} m short '
+                    f'(vision=True) — waiting {self._nav_delay}s...')
+            else:
+                self.get_logger().info(
+                    f'[NAV] Simulating navigation to ({x:.3f}, {y:.3f}) '
+                    f'— waiting {self._nav_delay}s...')
             time.sleep(self._nav_delay)
 
             if self._force_stopped:
@@ -135,9 +175,15 @@ class NavigationNode(Node):
                     f'[NAV] Navigation ABORTED (force stopped) -> "failure"')
             else:
                 self._status_pub.publish(String(data='point_reached'))
-                self.get_logger().info(
-                    f'[NAV] Navigation COMPLETE -> "point_reached" '
-                    f'at ({x:.3f}, {y:.3f})')
+                if vision:
+                    self.get_logger().info(
+                        f'[NAV] Navigation COMPLETE (vision standoff) -> '
+                        f'"point_reached" near ({x:.3f}, {y:.3f}) '
+                        f'(stopped {self._vision_standoff_m:.2f} m short)')
+                else:
+                    self.get_logger().info(
+                        f'[NAV] Navigation COMPLETE -> "point_reached" '
+                        f'at ({x:.3f}, {y:.3f})')
         except Exception as e:
             self.get_logger().error(
                 f'[NAV] Exception during navigation: {e}\n'

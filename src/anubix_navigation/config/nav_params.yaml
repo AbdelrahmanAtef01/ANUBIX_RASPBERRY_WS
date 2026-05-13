@@ -2,6 +2,11 @@ anubix_navigation:
   ros__parameters:
     simulate: true
     nav_delay: 2.0
+    # When the master publishes vision=True on /supervisor/nav_vision, the
+    # nav stack stops this many metres short of the goal so the on-board
+    # camera can take over the final approach. vision=False drives all the
+    # way to the goal.
+    vision_standoff_m: 1.0
     # TODO: Nav2 parameters
     # base_frame: "base_link"
     # odom_frame: "odom"

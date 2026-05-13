@@ -122,12 +122,14 @@ ros2 topic list
 **Expected topics (partial list):**
 ```
 /supervisor/nav_goal
+/supervisor/nav_vision
 /supervisor/perception_goal
 /supervisor/target_camera
 /supervisor/arm_nav_goal
 /supervisor/grip
 /supervisor/spectral_target
 /supervisor/force_stop
+/arm/current_pose
 /nav/status
 /perception/status
 /perception/target_pose
