@@ -3,7 +3,7 @@
 Run these tests in order after installing on both machines.
 
 **Recent fixes applied:**
-- Navigation now returns `success` instead of `point_reached` (consistent with master expectations)
+- Navigation: Master now waits for terminal status ('point_reached', 'blocked', 'failure') instead of returning early on 'navigating' status
 - Jetson bridge now logs `/supervisor/nav_vision` flag forwarding to RPi
 - Spectrometer cloud model output parsing updated for "control with virus" / "control without virus" format
 - Perception/Vision stack now properly handles multiple consecutive requests (no longer ignores after first detection)
@@ -182,7 +182,7 @@ ros2 topic pub --once /supervisor/nav_goal geometry_msgs/PoseStamped \
 
 # Terminal 3 — Check navigation status
 ros2 topic echo /nav/status --once
-# Should show: data: 'success'
+# Should show: data: 'point_reached'
 ```
 
 ### Test 2: Arm Stack (runs on Jetson)
@@ -345,8 +345,9 @@ Go to plant at coordinates 3,5. Check for disease using camera 1. If found, move
 [anubix_master]: [TX] /supervisor/nav_goal (3.00, 5.00)
 [anubix_navigation]: Goal received: (3.000, 5.000)        ← on RPi terminal
 [anubix_navigation]: Move complete: (3.000, 5.000)
-[anubix_master]: [RX] /nav/status = success
-[anubix_master]: [FEEDBACK -> ANUBIX] /nav/status: success
+[anubix_master]: [RX] /nav/status = "navigating"
+[anubix_master]: [RX] /nav/status = "point_reached"
+[anubix_master]: [FEEDBACK -> ANUBIX] /nav/status: point_reached
 [anubix_master]: [POLL] 2 command(s) detected
 [anubix_master]: [CMD] supervisor/target_camera_1
 [anubix_master]: [TX] /supervisor/target_camera 1
@@ -546,7 +547,7 @@ EOF
 ✅ **Network**: Both machines can ping each other  
 ✅ **DDS**: Topics from both sides visible with `ros2 topic list`  
 ✅ **Heartbeats**: `/bridge/jetson_heartbeat` and `/bridge/rpi_heartbeat` flowing at 1 Hz  
-✅ **Navigation**: Publishes `success` on `/nav/status`  
+✅ **Navigation**: Publishes `point_reached` on `/nav/status`  
 ✅ **Arm**: Publishes `success` on `/arm/arm_status`, `successful_grip` on `/arm/gripper_status`  
 ✅ **Spectrometer**: Publishes `success` on `/spectrometer/status`, JSON on `/spectrometer/result`  
 ✅ **Vision**: Publishes `found` on `/perception/status`, 3D Pose on `/perception/target_pose`  
