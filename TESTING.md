@@ -4,9 +4,14 @@ Run these tests in order after installing on both machines.
 
 **Recent fixes applied:**
 - Navigation: Master now waits for terminal status ('point_reached', 'blocked', 'failure') instead of returning early on 'navigating' status
-- Jetson bridge now logs `/supervisor/nav_vision` flag forwarding to RPi
-- Spectrometer cloud model output parsing updated for "control with virus" / "control without virus" format
+- Jetson bridge now forwards `/supervisor/nav_vision`, `/supervisor/robot_id`, and `/supervisor/task_id` to RPi
+- Robot/task IDs now published on separate topics (not embedded in nav geometry) for cleaner architecture
+- Spectrometer cloud model output parsing updated for "Control with virus" / "Control without virus" format (capital C)
 - Perception/Vision stack now properly handles multiple consecutive requests (no longer ignores after first detection)
+- Vision node confidence threshold lowered to 0.2 for better leaf detection
+- Vision arm status callback now only logs when actively waiting for camera 2 calibration move
+- Supabase uploader now uses last nav_goal position from `/master/last_nav_position` for plant_location
+- Camera 2 now calculates depth (Z) using parallax from 1cm horizontal arm movement
 
 ---
 
