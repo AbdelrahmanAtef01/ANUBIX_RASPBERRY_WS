@@ -69,6 +69,14 @@ class RpiBridgeNode(Node):
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
+        # perception_goal uses VOLATILE on both publisher (master) and
+        # subscriber so repeated identical commands are always delivered.
+        trigger_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=200,
+            durability=DurabilityPolicy.VOLATILE,
+        )
         # force_stop must be VOLATILE on BOTH publisher and subscriber
         # — this bridge's e-stop publisher was the second source of
         # latched state on /supervisor/force_stop (the master being
@@ -100,8 +108,14 @@ class RpiBridgeNode(Node):
             PoseStamped, '/supervisor/nav_goal', self._on_nav_goal,
             cmd_qos, callback_group=self._sub_group)
         self.create_subscription(
-            String, '/supervisor/perception_goal', self._on_perception_goal,
+            String, '/supervisor/robot_id', self._on_robot_id,
             cmd_qos, callback_group=self._sub_group)
+        self.create_subscription(
+            String, '/supervisor/task_id', self._on_task_id,
+            cmd_qos, callback_group=self._sub_group)
+        self.create_subscription(
+            String, '/supervisor/perception_goal', self._on_perception_goal,
+            trigger_qos, callback_group=self._sub_group)
         self.create_subscription(
             String, '/supervisor/target_camera', self._on_target_camera,
             cmd_qos, callback_group=self._sub_group)
@@ -225,6 +239,22 @@ class RpiBridgeNode(Node):
         y = msg.pose.position.y
         self.get_logger().info(
             f'[BRIDGE<-Jetson] /supervisor/nav_goal pos=({x:.3f}, {y:.3f}) '
+            f'[total={total}]')
+
+    def _on_robot_id(self, msg: String):
+        with self._lock:
+            self._stats['robot_ids_received'] = self._stats.get('robot_ids_received', 0) + 1
+            total = self._stats['robot_ids_received']
+        self.get_logger().info(
+            f'[BRIDGE<-Jetson] /supervisor/robot_id = "{msg.data}" '
+            f'[total={total}]')
+
+    def _on_task_id(self, msg: String):
+        with self._lock:
+            self._stats['task_ids_received'] = self._stats.get('task_ids_received', 0) + 1
+            total = self._stats['task_ids_received']
+        self.get_logger().info(
+            f'[BRIDGE<-Jetson] /supervisor/task_id = "{msg.data}" '
             f'[total={total}]')
 
     def _on_perception_goal(self, msg: String):

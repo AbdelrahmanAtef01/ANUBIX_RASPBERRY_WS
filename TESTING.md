@@ -134,6 +134,8 @@ ros2 topic list
 ```
 /supervisor/nav_goal
 /supervisor/nav_vision          ← Navigation vision flag (True=vision-based approach)
+/supervisor/robot_id            ← Robot ID (latched, forwarded to RPi nav stack)
+/supervisor/task_id             ← Task ID (latched, forwarded to RPi nav stack)
 /supervisor/perception_goal
 /supervisor/target_camera
 /supervisor/arm_nav_goal
@@ -177,13 +179,21 @@ ros2 topic echo /rosout | grep -i bridge
 ### Test 1: Navigation Stack (runs on RPi)
 
 ```bash
+# Terminal 3 — Publish robot_id and task_id (latched, set before nav_goal)
+ros2 topic pub --once /supervisor/robot_id std_msgs/String \
+  '{data: "34a957fd-d45c-4dbf-8e02-be8e1b5e349a"}'
+ros2 topic pub --once /supervisor/task_id std_msgs/String \
+  '{data: "40e4060b-5bc8-4044-9d71-046fee27a757"}'
+
 # Terminal 3 — Send a navigation goal
 ros2 topic pub --once /supervisor/nav_goal geometry_msgs/PoseStamped \
   '{header: {frame_id: "map"}, pose: {position: {x: 3.0, y: 5.0, z: 0.0}, orientation: {w: 1.0}}}'
 
 # Watch Terminal 1 (RPi) — should see:
-# [anubix_navigation]: Goal received: (3.000, 5.000)
-# [anubix_navigation]: Move complete: (3.000, 5.000)
+# [NAV] robot_id = "34a957fd-d45c-4dbf-8e02-be8e1b5e349a"
+# [NAV] task_id = "40e4060b-5bc8-4044-9d71-046fee27a757"
+# [NAV] Goal RECEIVED: (3.000, 5.000) frame="map" vision=False
+# [NAV] robot_id='34a957fd-...' task_id='40e4060b-...'
 
 # Terminal 3 — Check navigation status
 ros2 topic echo /nav/status --once
@@ -223,13 +233,12 @@ ros2 topic echo /arm/touch_status --once
 ros2 topic pub --once /supervisor/spectral_target std_msgs/String '{data: "disease"}'
 
 # Watch Terminal 2 (Jetson) — should see:
-# [anubix_spectrometer]: Target received: disease
-# [anubix_spectrometer]: Status: reading
-# [anubix_spectrometer]: Status: applying_ML
-# [anubix_spectrometer]: Status: success
-# [anubix_spectrometer]: ML prediction: "control without virus" (or "control with virus")
-# [anubix_spectrometer]: Result: classification=healthy (or infected) confidence=0.92
-# [anubix_spectrometer]: Published result to /spectrometer/result
+# [SPECTRO] Target RECEIVED: task="disease"
+# [SPECTRO] Status published: "reading"
+# [SPECTRO] Status published: "applying_ML"
+# [SPECTRO] Analysis complete: classification="healthy" value=0.0000
+# [SPECTRO] Status published: "success"
+# [SPECTRO] Result published to /spectrometer/result
 
 # Terminal 3 — Check spectrometer status
 ros2 topic echo /spectrometer/status --once
@@ -238,9 +247,9 @@ ros2 topic echo /spectrometer/status --once
 # Check spectrometer result (JSON)
 ros2 topic echo /spectrometer/result --once
 # Should show JSON like:
-# data: '{"task_type":"disease","value":0.0,"classification":"healthy","confidence":0.92,...}'
+# data: '{"task_type":"disease","value":0.0,"classification":"healthy","details":{...},...}'
 # OR if infected:
-# data: '{"task_type":"disease","value":1.0,"classification":"infected","confidence":0.95,...}'
+# data: '{"task_type":"disease","value":1.0,"classification":"infected","details":{...},...}'
 ```
 
 ### Test 4: Supabase Uploader (runs on Jetson, triggered by spectrometer)
@@ -418,7 +427,7 @@ Mission complete. I navigated to plant at (3, 5), detected a leaf using the dept
    - `reading_id`: (auto-generated UUID)
    - `robot_id`: 34a957fd-d45c-4dbf-8e02-be8e1b5e349a
    - `task_id`: 40e4060b-5bc8-4044-9d71-046fee27a757
-   - `plant_location`: "0,0" (or whatever you set in `supabase_params.yaml`)
+   - `plant_location`: "3.00,5.00" (the last nav_goal coordinates)
    - `disease_detected`: true (if "control with virus") or false (if "control without virus")
    - `disease_name`: "TMV" (if infected) or "none" (if healthy)
    - `photo_1_url`: https://bdkutmmrcjckaazzzspe.supabase.co/storage/v1/object/public/plant-images/scan_...jpg

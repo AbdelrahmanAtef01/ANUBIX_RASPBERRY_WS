@@ -50,6 +50,8 @@ class NavigationNode(Node):
         # Latched: True means "stop short, vision takes over". Defaults
         # False so older callers that don't set the flag keep working.
         self._vision_flag = False
+        self._robot_id = ''
+        self._task_id = ''
 
         self._sub_group = ReentrantCallbackGroup()
 
@@ -79,6 +81,12 @@ class NavigationNode(Node):
             callback_group=self._sub_group)
         self.create_subscription(
             Bool, '/supervisor/nav_vision', self._on_nav_vision, cmd_qos,
+            callback_group=self._sub_group)
+        self.create_subscription(
+            String, '/supervisor/robot_id', self._on_robot_id, cmd_qos,
+            callback_group=self._sub_group)
+        self.create_subscription(
+            String, '/supervisor/task_id', self._on_task_id, cmd_qos,
             callback_group=self._sub_group)
         self.create_subscription(
             Bool, '/supervisor/force_stop', self._on_force_stop, force_stop_qos,
@@ -119,6 +127,14 @@ class NavigationNode(Node):
             f'(stop {self._vision_standoff_m:.2f} m short of goal '
             f'when True)')
 
+    def _on_robot_id(self, msg: String):
+        self._robot_id = msg.data.strip()
+        self.get_logger().info(f'[NAV] robot_id = "{self._robot_id}"')
+
+    def _on_task_id(self, msg: String):
+        self._task_id = msg.data.strip()
+        self.get_logger().info(f'[NAV] task_id = "{self._task_id}"')
+
     def _on_nav_goal(self, msg: PoseStamped):
         x = msg.pose.position.x
         y = msg.pose.position.y
@@ -130,6 +146,9 @@ class NavigationNode(Node):
         self.get_logger().info(
             f'[NAV] Goal RECEIVED: ({x:.3f}, {y:.3f}) frame="{frame}" '
             f'vision={vision}')
+        if self._robot_id or self._task_id:
+            self.get_logger().info(
+                f'[NAV] robot_id={self._robot_id!r} task_id={self._task_id!r}')
         if vision:
             self.get_logger().info(
                 f'[NAV] vision=True → will stop ~{self._vision_standoff_m:.2f} m '
