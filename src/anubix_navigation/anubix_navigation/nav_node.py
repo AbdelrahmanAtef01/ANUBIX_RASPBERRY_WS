@@ -7,14 +7,14 @@ Subscribes to: /supervisor/nav_goal     (geometry_msgs/PoseStamped) <- from Jets
                /supervisor/force_stop   (std_msgs/Bool)             <- from Jetson master
 Publishes to:  /nav/status              (std_msgs/String)           -> to Jetson master
 
-Status values: navigating | point_reached | blocked | failure
+Status values: navigating | success | blocked | failure
 
 Vision flag:
   - True  → nav stops ~vision_standoff_m metres short of the goal so the
             on-board camera can take over the final approach.
   - False → nav drives all the way to the goal.
 
-The mock just sleeps and reports point_reached either way; the standoff
+The mock just sleeps and reports success either way; the standoff
 behaviour is logged so the architecture is in place for the real Nav2
 hook-up later.
 """
@@ -191,15 +191,15 @@ class NavigationNode(Node):
                 self.get_logger().warning(
                     f'[NAV] Navigation ABORTED (force stopped) -> "failure"')
             else:
-                self._status_pub.publish(String(data='point_reached'))
+                self._status_pub.publish(String(data='success'))
                 if vision:
                     self.get_logger().info(
                         f'[NAV] Navigation COMPLETE (vision standoff) -> '
-                        f'"point_reached" near ({x:.3f}, {y:.3f}) '
+                        f'"success" near ({x:.3f}, {y:.3f}) '
                         f'(stopped {self._vision_standoff_m:.2f} m short)')
                 else:
                     self.get_logger().info(
-                        f'[NAV] Navigation COMPLETE -> "point_reached" '
+                        f'[NAV] Navigation COMPLETE -> "success" '
                         f'at ({x:.3f}, {y:.3f})')
         except Exception as e:
             self.get_logger().error(

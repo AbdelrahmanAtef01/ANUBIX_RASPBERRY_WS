@@ -20,6 +20,9 @@ TODO: Integrate actual perception pipeline:
       - Harvest readiness assessment
 """
 
+import time
+import threading
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -42,6 +45,8 @@ class PerceptionNode(Node):
         self._detection_delay = self.get_parameter('detection_delay').value
         self._active_camera = 1
         self._force_stopped = False
+        self._busy = False
+        self._lock = threading.Lock()
 
         cmd_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -106,39 +111,57 @@ class PerceptionNode(Node):
             self._status_pub.publish(String(data='not_found'))
             return
 
+        with self._lock:
+            if self._busy:
+                self.get_logger().warning(
+                    '[PERCEPTION] Already processing — ignoring new goal')
+                return
+            self._busy = True
+
         task = msg.data
         self.get_logger().info(
             f'[PERCEPTION] Goal received: task={task!r} camera={self._active_camera}')
 
         if self._simulate:
-            self.create_timer(
-                self._detection_delay,
-                lambda: self._complete_detection(task),
-            )
+            threading.Thread(
+                target=self._simulate_detection,
+                args=(task,),
+                daemon=True,
+            ).start()
         else:
             # TODO: Run detection model, publish result
-            pass
+            with self._lock:
+                self._busy = False
 
-    def _complete_detection(self, task: str):
-        if self._force_stopped:
-            self._status_pub.publish(String(data='not_found'))
-            self.get_logger().warning(
-                f'[PERCEPTION] Detection aborted: task={task!r} — force stopped')
-            return
+    def _simulate_detection(self, task: str):
+        try:
+            self.get_logger().info(
+                f'[PERCEPTION] Simulating detection for task={task!r} '
+                f'— waiting {self._detection_delay}s...')
+            time.sleep(self._detection_delay)
 
-        self._status_pub.publish(String(data='found'))
-        self.get_logger().info(
-            f'[PERCEPTION] Status → found  task={task!r}')
+            if self._force_stopped:
+                self._status_pub.publish(String(data='not_found'))
+                self.get_logger().warning(
+                    f'[PERCEPTION] Detection aborted: task={task!r} — force stopped')
+                return
 
-        pose = Pose()
-        pose.position.x = self.get_parameter('default_target_x').value
-        pose.position.y = self.get_parameter('default_target_y').value
-        pose.position.z = self.get_parameter('default_target_z').value
-        pose.orientation.w = 1.0
-        self._pose_pub.publish(pose)
-        self.get_logger().info(
-            f'[PERCEPTION] target_pose published: '
-            f'({pose.position.x}, {pose.position.y}, {pose.position.z})')
+            self._status_pub.publish(String(data='found'))
+            self.get_logger().info(
+                f'[PERCEPTION] Status → found  task={task!r}')
+
+            pose = Pose()
+            pose.position.x = self.get_parameter('default_target_x').value
+            pose.position.y = self.get_parameter('default_target_y').value
+            pose.position.z = self.get_parameter('default_target_z').value
+            pose.orientation.w = 1.0
+            self._pose_pub.publish(pose)
+            self.get_logger().info(
+                f'[PERCEPTION] target_pose published: '
+                f'({pose.position.x}, {pose.position.y}, {pose.position.z})')
+        finally:
+            with self._lock:
+                self._busy = False
 
 
 def main(args=None):

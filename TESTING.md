@@ -2,6 +2,12 @@
 
 Run these tests in order after installing on both machines.
 
+**Recent fixes applied:**
+- Navigation now returns `success` instead of `point_reached` (consistent with master expectations)
+- Jetson bridge now logs `/supervisor/nav_vision` flag forwarding to RPi
+- Spectrometer cloud model output parsing updated for "control with virus" / "control without virus" format
+- Perception/Vision stack now properly handles multiple consecutive requests (no longer ignores after first detection)
+
 ---
 
 ## Phase 0: Pre-Launch Checks
@@ -122,7 +128,7 @@ ros2 topic list
 **Expected topics (partial list):**
 ```
 /supervisor/nav_goal
-/supervisor/nav_vision
+/supervisor/nav_vision          ← Navigation vision flag (True=vision-based approach)
 /supervisor/perception_goal
 /supervisor/target_camera
 /supervisor/arm_nav_goal
@@ -216,7 +222,8 @@ ros2 topic pub --once /supervisor/spectral_target std_msgs/String '{data: "disea
 # [anubix_spectrometer]: Status: reading
 # [anubix_spectrometer]: Status: applying_ML
 # [anubix_spectrometer]: Status: success
-# [anubix_spectrometer]: Result: healthy (confidence=0.92, details={...})
+# [anubix_spectrometer]: ML prediction: "control without virus" (or "control with virus")
+# [anubix_spectrometer]: Result: classification=healthy (or infected) confidence=0.92
 # [anubix_spectrometer]: Published result to /spectrometer/result
 
 # Terminal 3 — Check spectrometer status
@@ -227,6 +234,8 @@ ros2 topic echo /spectrometer/status --once
 ros2 topic echo /spectrometer/result --once
 # Should show JSON like:
 # data: '{"task_type":"disease","value":0.0,"classification":"healthy","confidence":0.92,...}'
+# OR if infected:
+# data: '{"task_type":"disease","value":1.0,"classification":"infected","confidence":0.95,...}'
 ```
 
 ### Test 4: Supabase Uploader (runs on Jetson, triggered by spectrometer)
@@ -248,9 +257,14 @@ ros2 topic echo /supabase/upload_status --once
 # Should show: data: 'success'
 ```
 
-**Note:** If camera is not available, node will log a warning but DB insert still proceeds (photo_url = null).
+**Note:** 
+- If camera is not available, node will log a warning but DB insert still proceeds (photo_url = null).
+- Cloud model returns "control with virus" → disease_detected=true, disease_name="TMV"
+- Cloud model returns "control without virus" → disease_detected=false, disease_name="none"
 
 ### Test 5: Vision Stack (runs on Jetson)
+
+**Note:** Vision/perception stack now properly handles multiple consecutive requests. You can send detection goals multiple times and they will all be processed correctly.
 
 #### Camera 1 (RealSense) test — only if you have RealSense connected:
 
@@ -395,15 +409,20 @@ Mission complete. I navigated to plant at (3, 5), detected a leaf using the dept
 1. Go to your Supabase dashboard: https://supabase.com/dashboard
 2. Navigate to **Table Editor** → `readings` table
 3. You should see a new row with:
+   - `reading_id`: (auto-generated UUID)
    - `robot_id`: 34a957fd-d45c-4dbf-8e02-be8e1b5e349a
    - `task_id`: 40e4060b-5bc8-4044-9d71-046fee27a757
    - `plant_location`: "0,0" (or whatever you set in `supabase_params.yaml`)
-   - `disease_detected`: true/false
-   - `disease_name`: "TMV" or "none"
+   - `disease_detected`: true (if "control with virus") or false (if "control without virus")
+   - `disease_name`: "TMV" (if infected) or "none" (if healthy)
    - `photo_1_url`: https://bdkutmmrcjckaazzzspe.supabase.co/storage/v1/object/public/plant-images/scan_...jpg
    - `recorded_at`: timestamp
 
 4. Click the photo URL — should open the captured plant image in your browser
+
+**Cloud model output mapping:**
+- "control with virus" → disease_detected=true, disease_name="TMV"
+- "control without virus" → disease_detected=false, disease_name="none"
 
 ---
 
