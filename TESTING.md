@@ -13,6 +13,13 @@ Run these tests in order after installing on both machines.
 - Supabase uploader now uses last nav_goal position from `/master/last_nav_position` for plant_location
 - Camera 2 now calculates depth (Z) using parallax from 1cm horizontal arm movement
 
+> **For the real arm and real navigation rollouts, see the dedicated
+> guides kept alongside the project (one level above this workspace,
+> NOT inside either git repo):**
+> - `REAL_ARM_STACK.md`
+> - `REAL_NAVIGATION_STACK.md` — also contains the spec for the 2 Hz
+>   live-location uploader that the real-nav implementer must add
+
 ---
 
 ## Phase 0: Pre-Launch Checks
@@ -115,6 +122,40 @@ ros2 launch anubix_bringup jetson.launch.py
 [anubix_vision]: RealSense SDK: available/NOT found
 [anubix_jetson_bridge]: Jetson bridge ready | publishing heartbeat at 1 Hz
 [anubix_supabase_uploader]: ANUBIX Supabase Uploader Node
+```
+
+---
+
+## Phase 1.5: Laptop → Jetson SSH Port Forward (required for OmniLink)
+
+The master node on the Jetson runs an HTTP tool-callback server on
+**port 5055**. OmniLink's web UI is loaded in the **laptop's browser**
+and its Content-Security-Policy only allows requests to `localhost/*`.
+To bridge the two, open one SSH tunnel from the laptop that forwards
+`localhost:5055` → `jetson:5055`.
+
+### On the LAPTOP (where the browser runs)
+
+Open a new terminal **on the laptop** (NOT on the Pi, NOT on the
+Jetson):
+
+```bash
+# Replace 192.168.1.10 with the Jetson's LAN IP if different.
+ssh -L 5055:localhost:5055 anubix@192.168.1.10
+```
+
+**Keep this shell open for the entire session.** Closing it kills the
+tunnel and OmniLink tool calls start failing with
+`ERR_CONNECTION_REFUSED`.
+
+Verify it works:
+
+```bash
+# On the laptop:
+curl -i http://localhost:5055/tool
+# 200 / 405 / JSON from the master = tunnel is alive.
+# "Connection refused" = master not running on Jetson.
+# "Failed to connect" = SSH tunnel is not up.
 ```
 
 ---
