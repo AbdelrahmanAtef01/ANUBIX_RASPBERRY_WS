@@ -14,9 +14,8 @@ Vision flag:
             on-board camera can take over the final approach.
   - False → nav drives all the way to the goal.
 
-The mock just sleeps and reports point_reached either way; the standoff
-behaviour is logged so the architecture is in place for the real Nav2
-hook-up later.
+Preemption: A new nav_goal while navigating cancels the current goal and
+starts the new one (matches Nav2 behavior).
 """
 
 import time
@@ -39,19 +38,18 @@ class NavigationNode(Node):
 
         self.declare_parameter('simulate', True)
         self.declare_parameter('nav_delay', 2.0)
-        # How far in front of the goal nav stops when vision=True.
         self.declare_parameter('vision_standoff_m', 1.0)
         self._simulate = self.get_parameter('simulate').value
         self._nav_delay = self.get_parameter('nav_delay').value
         self._vision_standoff_m = float(self.get_parameter('vision_standoff_m').value)
         self._force_stopped = False
         self._navigating = False
+        self._preempted = False
         self._nav_lock = threading.Lock()
-        # Latched: True means "stop short, vision takes over". Defaults
-        # False so older callers that don't set the flag keep working.
         self._vision_flag = False
         self._robot_id = ''
         self._task_id = ''
+        self._ready = False
 
         self._sub_group = ReentrantCallbackGroup()
 
@@ -61,9 +59,6 @@ class NavigationNode(Node):
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
-        # force_stop is edge-triggered — must be VOLATILE so a stale
-        # latched True (e.g. from a previous rpi_bridge emergency stop)
-        # cannot strand this node on every restart.
         force_stop_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -106,14 +101,20 @@ class NavigationNode(Node):
             '[NAV] Publishing on /nav/status (String, RELIABLE)')
         self.get_logger().info('[NAV] Ready and waiting for goals.')
 
+        # Arm the node after a short delay so TRANSIENT_LOCAL late-join
+        # messages from a previous session are discarded.
+        self._arm_timer = self.create_timer(1.0, self._arm_node)
+
+    def _arm_node(self):
+        self._ready = True
+        self._arm_timer.cancel()
+        self.get_logger().info('[NAV] Node ARMED — accepting goals.')
+
     def _on_force_stop(self, msg: Bool):
-        # Edge semantics: True aborts any in-flight nav (the simulated
-        # move loop checks the flag mid-sleep). False re-arms the node so
-        # the next nav_goal works. Mirrors the master's True+False edge
-        # publish so a stale latched True can never strand the robot.
         was = self._force_stopped
         self._force_stopped = bool(msg.data)
         if self._force_stopped:
+            self._preempted = True
             self.get_logger().warning(
                 '[NAV] *** FORCE STOP RECEIVED *** — aborting in-flight nav')
         elif was:
@@ -136,6 +137,11 @@ class NavigationNode(Node):
         self.get_logger().info(f'[NAV] task_id = "{self._task_id}"')
 
     def _on_nav_goal(self, msg: PoseStamped):
+        if not self._ready:
+            self.get_logger().info(
+                '[NAV] Ignoring TRANSIENT_LOCAL late-join message (node not armed yet)')
+            return
+
         x = msg.pose.position.x
         y = msg.pose.position.y
         frame = msg.header.frame_id
@@ -165,12 +171,12 @@ class NavigationNode(Node):
         with self._nav_lock:
             if self._navigating:
                 self.get_logger().warning(
-                    '[NAV] Already navigating! Ignoring new goal. Publishing "failure".')
-                self._status_pub.publish(String(data='failure'))
-                return
+                    '[NAV] Preempting current navigation for new goal.')
+                self._preempted = True
+                # Let the old thread finish (it checks _preempted flag)
             self._navigating = True
+            self._preempted = False
 
-        # Publish "navigating" immediately so the master knows we received it
         self._status_pub.publish(String(data='navigating'))
         self.get_logger().info('[NAV] Published status: "navigating"')
 
@@ -180,9 +186,7 @@ class NavigationNode(Node):
                 args=(x, y, vision),
                 daemon=True).start()
         else:
-            # TODO: Send goal to Nav2 action server. When vision=True,
-            # truncate the goal to be vision_standoff_m short along the
-            # current heading before forwarding to Nav2.
+            # TODO: Send goal to Nav2 action server.
             self.get_logger().warning(
                 '[NAV] Hardware mode not yet implemented! '
                 'Falling back to simulated delay.')
@@ -203,23 +207,32 @@ class NavigationNode(Node):
                 self.get_logger().info(
                     f'[NAV] Simulating navigation to ({x:.3f}, {y:.3f}) '
                     f'— waiting {self._nav_delay}s...')
-            time.sleep(self._nav_delay)
 
-            if self._force_stopped:
-                self._status_pub.publish(String(data='failure'))
+            elapsed = 0.0
+            step = 0.1
+            while elapsed < self._nav_delay:
+                if self._preempted or self._force_stopped:
+                    self.get_logger().warning(
+                        f'[NAV] Navigation PREEMPTED/STOPPED at {elapsed:.1f}s')
+                    return
+                time.sleep(step)
+                elapsed += step
+
+            if self._preempted or self._force_stopped:
                 self.get_logger().warning(
-                    f'[NAV] Navigation ABORTED (force stopped) -> "failure"')
+                    f'[NAV] Navigation ABORTED after delay -> no status published (preempted)')
+                return
+
+            self._status_pub.publish(String(data='point_reached'))
+            if vision:
+                self.get_logger().info(
+                    f'[NAV] Navigation COMPLETE (vision standoff) -> '
+                    f'"point_reached" near ({x:.3f}, {y:.3f}) '
+                    f'(stopped {self._vision_standoff_m:.2f} m short)')
             else:
-                self._status_pub.publish(String(data='point_reached'))
-                if vision:
-                    self.get_logger().info(
-                        f'[NAV] Navigation COMPLETE (vision standoff) -> '
-                        f'"point_reached" near ({x:.3f}, {y:.3f}) '
-                        f'(stopped {self._vision_standoff_m:.2f} m short)')
-                else:
-                    self.get_logger().info(
-                        f'[NAV] Navigation COMPLETE -> "point_reached" '
-                        f'at ({x:.3f}, {y:.3f})')
+                self.get_logger().info(
+                    f'[NAV] Navigation COMPLETE -> "point_reached" '
+                    f'at ({x:.3f}, {y:.3f})')
         except Exception as e:
             self.get_logger().error(
                 f'[NAV] Exception during navigation: {e}\n'
